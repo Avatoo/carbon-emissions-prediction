@@ -1,0 +1,230 @@
+---
+title: "How green is your business?"
+subtitle: "A Carbon Emissions Prediction Exercise"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+This notebook aims to 
+
+1. Explore raw dataset `carbonemissions.csv`
+2. Check on data quality
+3. Build a predictive model to esitmate carbon emissions as baseline model
+4. Evaluate model performance
+5. Make strategy for future iterations
+
+## Set up
+
+We start from data import and library loading. Rename response variable **Carbon Emission  (tCO2e/mmUSD)** to **target** for convenience. Clean the rest variable names to be snake case.
+
+```{r load, message=FALSE, warning=FALSE}
+library(skimr)          # summary stats
+library(DataExplorer)   # variable profiling, EDA
+library(tidyverse)      # data manipulation
+library(tidymodels)     # modelling
+library(highcharter)    # visualization
+library(janitor)        # clean column names, convert to snake case
+library(countrycode)    # feature engineering - from country to continent
+```
+
+
+```{r import, message=FALSE, warning=FALSE}
+df_co2 <- read_csv("20190321 Predicting carbonemissions.csv") %>% 
+  rename(target = `Carbon Emission  (tCO2e/mmUSD)`) %>% 
+  clean_names()
+dim(df_co2)
+```
+
+
+## EDA
+
+Next we take a look at summary statistics, create a variable profilling report by `DataExplorer::create_report(df_co2, y = "target")`. See file `report.html` for details. The correlation heatmap is not showing up over there because variables are a mix of numeric and categorical and the number of missing values is high. 
+
+```{r summary, eval=FALSE, include=FALSE}
+skim(df_co2)
+```
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+create_report(df_co2, y = "target")
+```
+
+
+## Feature selection
+
+We let in all of numeric variables and a subset of categorical variables who have fewer levels than others due to time constrain.
+
+```{r feature_continuous}
+# select all numerical
+cols_in_num = df_co2 %>% 
+  select_if(is.numeric) %>% 
+  names()
+
+df_co2 %>% select(one_of(cols_in_num)) %>% skim()
+```
+
+
+```{r feature_categorical}
+# hand pick easy categorical vars based on eda
+cols_in_cat = c(
+  'listed',
+  'gics_sector',
+  'hq_country',          # To group by continent? package countrycode
+  'accounting_year_end', # To convert to date index, month, year
+  'scope_2_figure_used_for_intensity'
+)
+
+df_co2 %>% select(one_of(cols_in_cat)) %>% skim()
+```
+
+
+Convert **hq_country** from country to continent name, reducing the number of categories from  to . Luckily package 'countrycode' allows us to look up country and continent. 
+
+Convert **accounting_year_end** column from character to Date format in order to expand it into a rich set of date related features such as year, month, day in a week etc.
+
+The missing values requires possibly different imputation methods:
+- The one observation with missing **gics_sector** and **hq_country** doesn't contain geo location information, so we get rid of it. 
+- The 47 NA values in categorical feature **scope_2_figure_used_for_intensity** can be replaced by new level "Unknown".
+- Impute all the numeric variables with their median
+
+
+```{r feature_more}
+df_co2 <- df_co2 %>% 
+  mutate(hq_country = countrycode(sourcevar = hq_country, origin = 'country.name', destination = 'continent')) 
+
+
+df_co2 <- df_co2 %>% 
+  mutate(accounting_year_end = as.Date(accounting_year_end,  '%d/%m/%Y'))
+
+
+df_co3 <- df_co2 %>% 
+  select(cols_in_num, cols_in_cat)
+
+# check on missing values. Impu
+skim_to_wide(df_co3) %>% 
+  filter(missing!=0)
+```
+
+
+## Train and Test Split
+
+Split the whole dataset into train and test by 2:1.
+
+```{r split}
+set.seed(42)
+sss <- df_co3 %>% 
+  initial_split(prop = 2/3)
+df_train <- training(sss)
+df_test <- testing(sss)
+
+dim(df_train)
+dim(df_test)
+```
+
+Create a recipe of steps to be taken. Apply the recipe to train and test separately. 
+
+```{r train}
+rec <- df_train %>% 
+    recipe(target ~., data = .) %>% 
+    update_role(account_id, new_role = "id") %>% 
+    step_date(accounting_year_end) %>% 
+    step_naomit(gics_sector, hq_country) %>% 
+    step_unknown(scope_2_figure_used_for_intensity) %>% 
+    step_medianimpute(all_numeric()) %>% 
+    step_nzv(all_predictors()) %>% 
+    #step_center(all_numeric(),  -account_id, -target) %>% 
+    #step_scale(all_numeric(),  -account_id, -target) %>% 
+    #step_logit(all_outcomes()) %>% 
+    check_missing(all_predictors())
+
+prepped <- prep(rec)
+
+train <- prepped %>% 
+  juice()
+
+test <- prepped %>% 
+  bake(new_data = df_test)
+```
+
+
+Set a random forest engine for the regression problem.
+
+```{r fit2}
+fit2 <- rand_forest(mode = 'regression') %>%
+  parsnip::set_engine(engine = 'randomForest') %>%
+  fit(formula=formula(prepped), data = train)
+
+fit2$fit
+```
+
+
+
+## Evaluation
+
+We calculate evaluation metrics on both train and test sets. The model performs much better on train than on test, which means it is probably overfitting. Still, it seems to be a sensible baseline model given that r squared scores 0.69 on test set.
+
+```{r model_metrics, echo=FALSE}
+# train
+results1 = df_train %>% 
+  select(target) %>% 
+  bind_cols(pred = predict(fit2, new_data = train)) 
+# test
+results2 = df_test %>% 
+  filter(!is.na(gics_sector)) %>% 
+  select(target) %>% 
+  bind_cols(pred = predict(fit2, new_data = test))
+# combine
+list(results1, results2) %>% map_dfc(~ yardstick::metrics(truth=target, estimate=.pred, data=.x)) %>% select(-contains('.estimator')) %>% select(-.metric1) %>% set_names('Metric', 'Train Score', 'Test Score')
+
+summary(results2)
+```
+
+A comparison of actuals against predictions on the test set gives us more intuition. The model does a pretty good job for carbon emission values under 10000. Predictions of extreamely high carbon emission tend to be outliers in this model.
+
+```{r actual_vs_pred, echo=FALSE}
+highchart() %>%
+  hc_add_series(data = results2, mapping = hcaes(x=target, y=.pred), name = "Actuals VS Predictions", type = "scatter", color = "darkblue", alpha=0.5, marker = list(radius = 3)) %>%
+  hc_xAxis(min = 0, title = list(text = "Actuals")) %>%
+  hc_yAxis(min = 0, title = list(text = "Predictions")) %>%
+  hc_tooltip(crosshairs = TRUE) %>% 
+  hc_size(550, 500)
+```
+
+Another angle of interpreting the results is by inspecting variable importance from random forest. In this implementation, importance is meansured by total decrease in node impurities ie. residule sum of squares.  
+
+```{r variable_importance, echo=FALSE}
+data_plot = data.frame(fit2$fit$importance, row.names = row.names(fit2$fit$importance)) %>%
+rownames_to_column() %>%
+arrange(desc(IncNodePurity))
+
+data_plot
+
+data_plot %>% 
+  hchart(., type = "bar", color = 'red',
+       hcaes(x = rowname, 
+             y = IncNodePurity)) %>% 
+  hc_size(750, 400)
+```
+
+Again let's double check correlation on our cleaned test dataset, numeric variables only (for now). Turns out *ghg_revenue_intensity_t_co2e_mm_usd* is perfectly correlated to the target variable, so in the next iteration, we can take it out as it might a leaking the target information and affect other variables. 
+
+```{r correlation}
+test %>% select_if(is.numeric) %>% cor() %>% hchart()
+```
+
+
+
+## Next Steps
+
+- Train models on the majority and investigate outliers.
+- Divide data into different sections based on the target - carbon emission e.g. low and high. Create a model per section.
+- Better transformation of non normal (skewed, long tailed or with lots of missing) features eg. discretize them into even bins.
+- Clean and include more categorical features. 
+- Remove highly correlated but spurious variables eg. ghg_revenue_intensity_t_co2e_mm_usd.
+
+
+
