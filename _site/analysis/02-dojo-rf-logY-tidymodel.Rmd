@@ -1,0 +1,214 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## EDA
+
+```{r}
+library(skimr)
+library(tidyr)
+library(DataExplorer)
+library(tidyverse)
+library(tidymodels)
+library(highcharter)
+library(janitor)
+library(wtils)
+
+```
+
+Import data. Clean names to be snake case.
+
+```{r import, message=FALSE, warning=FALSE}
+df_co2 <- read_csv("20190321 Predicting carbonemissions.csv") %>% 
+  rename(target = `Carbon Emission  (tCO2e/mmUSD)`) %>% 
+  clean_names()
+dim(df_co2)
+```
+
+
+## Summary Stats
+
+```{r summary}
+skim(df_co2)
+```
+
+
+```{r message=FALSE, warning=FALSE}
+create_report(df_co2, y = "target")
+```
+
+
+```{r corr}
+# df_co2 %>% 
+#   select_if(is.numeric) %>% 
+#   select(-account_id) %>% 
+#   cor() %>% 
+#   hchart()
+
+```
+
+## Rough variable selection
+
+```{r feature_continuous}
+cols_in_num = df_co2 %>% 
+  select_if(is.numeric) %>% 
+  #select(-account_id) %>% 
+  names()
+
+cols_in_num
+```
+
+Hand pick categorical variables to be included.
+
+```{r feature_categorical}
+# df_vars_cat = df_co2 %>% 
+#   select_if(is.character)
+
+# hand pick easy categorical vars
+cols_in_cat = c(
+  'listed',
+  'gics_sector',
+  'hq_country', # can we group by continent? package countrycode
+  'accounting_year_end', # convert to date index, month, year
+  'scope_2_figure_used_for_intensity'
+)
+```
+
+Convert *hq_country* to be continent to reduce categories.
+
+```{r feature_contry}
+library(countrycode)
+
+df_co2[, 'hq_country'] <- countrycode(sourcevar = df_co2$hq_country, origin = 'country.name', destination = 'continent')
+
+summary(as.factor(df_co2$hq_country))
+```
+
+TODO: remove the NA case?
+
+```{r feature_time_expand}
+# library(timetk)
+# library(lubridate)
+# df_time_in = df_co2 %>% 
+#   mutate(accounting_year_end = as.Date(accounting_year_end,  '%d/%m/%Y')) %>%   
+#   tk_augment_timeseries_signature() %>% 
+#   select(index.num, year, month.xts, quarter) 
+
+df_co2 = df_co2 %>% 
+  mutate(accounting_year_end = as.Date(accounting_year_end,  '%d/%m/%Y'))
+
+```
+
+```{r feature_integration}
+df_co3 = df_co2 %>% 
+  select(cols_in_num, cols_in_cat) #%>% 
+  #bind_cols(df_time_in)
+
+skim_to_wide(df_co3) %>% 
+  filter(missing!=0)
+```
+
+
+## Split
+
+```{r split}
+set.seed(42)
+sss <- df_co3 %>% 
+  # select(-scope_1_quality_flag, -location_based_scope_2_quality_flag) %>% 
+  # mutate_if(is.character, as.factor) %>% 
+  initial_split(prop = 3/4)
+df_train <- training(sss)
+df_test <- testing(sss)
+
+dim(df_train)
+dim(df_test)
+```
+
+
+```{r train}
+rec = df_train %>% 
+    recipe(target ~., data = .) %>% 
+    update_role(account_id, new_role = "id") %>% 
+    step_date(accounting_year_end) %>% 
+    step_naomit(hq_country) %>% 
+    step_unknown(scope_2_figure_used_for_intensity) %>% 
+    step_medianimpute(all_numeric()) %>% 
+    step_nzv(all_predictors()) %>% 
+    step_center(all_numeric(),  -account_id) %>% 
+    step_scale(all_numeric(),  -account_id) %>% 
+    #step_logit(all_outcomes()) %>% 
+    check_missing(all_predictors())
+
+prepped = prep(rec)
+
+train = prepped %>% 
+  juice()
+
+test = prepped %>% 
+  bake(new_data = df_test)
+```
+
+
+```{r fit2}
+fit2 = rand_forest(mode = 'regression') %>%
+  parsnip::set_engine(engine = 'randomForest') %>%
+  fit(formula=formula(prepped), data = train)
+
+fit2$fit
+```
+
+
+
+## Evaluation
+
+```{r model_metrics, echo=FALSE}
+# train
+results1 = df_train %>% 
+  select(target) %>% 
+  bind_cols(pred = predict(fit2, new_data = train)) 
+
+results2 = df_test %>% 
+  filter(!is.na(gics_sector)) %>% 
+  select(target) %>% 
+  bind_cols(pred = predict(fit2, new_data = test))
+
+list(results1, results2) %>% map_dfc(~ yardstick::metrics(truth=target, estimate=.pred, data=.x)) %>% select(-contains('.estimator')) %>% select(-.metric1) %>% set_names('Metric', 'Train Score', 'Test Score')
+```
+
+Next we look at actuals against predictions on the test set.
+
+```{r actual_vs_pred, echo=FALSE}
+highchart() %>%
+  hc_add_series(data = results2, mapping = hcaes(x=target, y=.pred), name = "Actuals VS Predictions", type = "scatter", color = "#4BBDAD", marker = list(radius = 3)) %>%
+  hc_xAxis(min = 0, title = list(text = "Actuals")) %>%
+  hc_yAxis(min = 0, title = list(text = "Predictions")) %>%
+  hc_tooltip(crosshairs = TRUE) %>% 
+  hc_size(550, 500)
+```
+
+```{r variable_importance, echo=FALSE}
+data_plot = data.frame(fit2$fit$importance, row.names = row.names(fit2$fit$importance)) %>%
+rownames_to_column() %>%
+arrange(desc(IncNodePurity))
+
+data_plot
+
+data_plot %>% 
+  hchart(., type = "bar", color = '#FFC100',
+       hcaes(x = rowname, 
+             y = IncNodePurity)) %>% 
+  hc_size(750, 400)
+```
+
+## Next
+
+- Investigate outliers
+- Divide data into different sections. Create model per section. For example, emission is equal to 0 or above 0.
+- 
+
+
