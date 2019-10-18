@@ -1,0 +1,12 @@
+name: "my-website"
+navbar:
+  title: "My Website"
+  left:
+    - text: "Home"
+      href: index.html
+    - text: "ModelFlow"
+      href: 04-dojo-rf-unscale-tidymodel.html
+    - text: "Profilling"
+      href: report.html       
+    - text: "About"
+      href: about.html
