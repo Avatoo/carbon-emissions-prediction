@@ -1,20 +1,9 @@
 ---
-title: "How green is your business?"
-subtitle: "A Carbon Emissions Prediction Exercise"
+title: "A Baseline Model Using Random Forest"
 ---
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
-
-This notebook aims to 
-
-1. Explore raw dataset `carbonemissions.csv`
-2. Check on data quality
-3. Build a predictive model to esitmate carbon emissions as baseline model
-4. Evaluate model performance
-5. Make strategy for future iterations
 
 ## Set up
 
@@ -25,7 +14,7 @@ library(skimr)          # summary stats
 library(DataExplorer)   # variable profiling, EDA
 library(tidyverse)      # data manipulation
 library(tidymodels)     # modelling
-library(highcharter)    # visualization
+library(highcharter)    # interactive visualization
 library(janitor)        # clean column names, convert to snake case
 library(countrycode)    # feature engineering - from country to continent
 ```

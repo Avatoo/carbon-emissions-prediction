@@ -1,6 +1,6 @@
 ---
-title: "About this website"
+title: "About"
 ---
 
-This website is rendered by rmarkdown.
+Created and maintained by [Ava Yang](https://www.linkedin.com/in/ava-huan-yang-7a979838/). See source code [here](https://github.com/Avatoo/carbon-emissions-prediction). 
 

@@ -1,10 +1,17 @@
 ---
 title: "How Green Can Your Business Be?"
-subtiel: "A Carbon Emissions Prediction Exercise"
+subtitle: "A Carbon Emissions Prediction Exercise"
 ---
 
-1. Explore raw dataset carbonemissions.csv
-2. Check on data quality
-3. Build a predictive model to esitmate carbon emissions as baseline model
-4. Evaluate model performance
-5. Make strategy for future iterations
+### ModelFlow
+
+- Explore raw dataset `carbonemissions.csv`
+- Check on data quality
+- Build a predictive model to esitmate carbon emissions as baseline model
+- Evaluate model performance
+- Make strategy for future iterations
+
+
+### Profilling
+
+- Exploratory data analysis on raw data at first sight.
