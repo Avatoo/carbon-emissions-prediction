@@ -52,7 +52,7 @@ cols_in_num = df_co2 %>%
   select_if(is.numeric) %>% 
   names()
 
-df_co2 %>% select(one_of(cols_in_num)) %>% skim()
+df_co2 %>% select(one_of(cols_in_num)) %>% skim_to_wide() %>% kable()
 ```
 
 
@@ -66,7 +66,7 @@ cols_in_cat = c(
   'scope_2_figure_used_for_intensity'
 )
 
-df_co2 %>% select(one_of(cols_in_cat)) %>% skim()
+df_co2 %>% select(one_of(cols_in_cat)) %>% skim_to_wide() %>% kable()
 ```
 
 
@@ -82,19 +82,20 @@ The missing values requires possibly different imputation methods:
 
 ```{r feature_more}
 df_co2 <- df_co2 %>% 
-  mutate(hq_country = countrycode(sourcevar = hq_country, origin = 'country.name', destination = 'continent')) 
+ mutate(hq_country = countrycode(sourcevar = hq_country, origin = 'country.name', destination = 'continent')) 
 
 
 df_co2 <- df_co2 %>% 
-  mutate(accounting_year_end = as.Date(accounting_year_end,  '%d/%m/%Y'))
+ mutate(accounting_year_end = as.Date(accounting_year_end,  '%d/%m/%Y'))
 
 
 df_co3 <- df_co2 %>% 
-  select(cols_in_num, cols_in_cat)
+ select(cols_in_num, cols_in_cat)
 
 # check on missing values. Impu
 skim_to_wide(df_co3) %>% 
-  filter(missing!=0)
+  filter(missing!=0) %>% 
+  kable()
 ```
 
 
@@ -155,7 +156,7 @@ fit2$fit
 
 We calculate evaluation metrics on both train and test sets. The model performs much better on train than on test, which means it is probably overfitting. Still, it seems to be a sensible baseline model given that r squared scores 0.69 on test set.
 
-```{r model_metrics, echo=FALSE}
+```{r model_metrics, message=FALSE, warning=FALSE}
 # train
 results1 = df_train %>% 
   select(target) %>% 
@@ -173,7 +174,7 @@ summary(results2)
 
 A comparison of actuals against predictions on the test set gives us more intuition. The model does a pretty good job for carbon emission values under 10000. Predictions of extreamely high carbon emission tend to be outliers in this model.
 
-```{r actual_vs_pred, echo=FALSE}
+```{r actual_vs_pred, message=FALSE, warning=FALSE}
 highchart() %>%
   hc_add_series(data = results2, mapping = hcaes(x=target, y=.pred), name = "Actuals VS Predictions", type = "scatter", color = "darkblue", alpha=0.5, marker = list(radius = 3)) %>%
   hc_xAxis(min = 0, title = list(text = "Actuals")) %>%
@@ -184,12 +185,10 @@ highchart() %>%
 
 Another angle of interpreting the results is by inspecting variable importance from random forest. In this implementation, importance is meansured by total decrease in node impurities ie. residule sum of squares.  
 
-```{r variable_importance, echo=FALSE}
+```{r variable_importance, message=FALSE, warning=FALSE}
 data_plot = data.frame(fit2$fit$importance, row.names = row.names(fit2$fit$importance)) %>%
 rownames_to_column() %>%
 arrange(desc(IncNodePurity))
-
-data_plot
 
 data_plot %>% 
   hchart(., type = "bar", color = 'red',
@@ -200,7 +199,7 @@ data_plot %>%
 
 Again let's double check correlation on our cleaned test dataset, numeric variables only (for now). Turns out *ghg_revenue_intensity_t_co2e_mm_usd* is perfectly correlated to the target variable, so in the next iteration, we can take it out as it might a leaking the target information and affect other variables. 
 
-```{r correlation}
+```{r correlation, message=FALSE, warning=FALSE}
 test %>% select_if(is.numeric) %>% cor() %>% hchart()
 ```
 
