@@ -1,6 +1,7 @@
-# How green can your business be?
-
-## A Carbon Emissions Prediction Exercise
+---
+title: "How Green Can Your Business Be?"
+subtiel: "A Carbon Emissions Prediction Exercise"
+---
 
 1. Explore raw dataset carbonemissions.csv
 2. Check on data quality
